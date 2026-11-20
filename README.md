@@ -68,8 +68,10 @@ CleanBOX-H313/
 │   ├── seekwave/         # SeekWave EA6521QF Wi-Fi 6 + BT 5.0 modules, FW & HALs
 │   └── ssv/              # SSV6256P / SSV6x5x Wi-Fi 5 modules & firmware
 ├── media/
-│   ├── bootanimation.zip # CleanBOX uncompressed boot animation
-│   └── cleanbox_boot_preview.jpg
+│   ├── bootanimation.zip        # CleanBOX Neon Synthwave Horizon boot animation
+│   ├── cleanbox_splash.png      # 1280x720 Stage 1 Bootloader splash reference
+│   ├── cleanbox_boot_preview.jpg
+│   └── cleanbox_boot_video.mp4
 ├── system/
 │   ├── bin/
 │   │   ├── fd655_panel            # Front LED display supervised daemon
@@ -80,7 +82,8 @@ CleanBOX-H313/
 │       ├── customer_ir_df00.kl    # Tanix / standard NEC IR remote keymap
 │       └── Vendor_1d5a_Product_c081.kl # Remoter ATV3 Bluetooth BLE Air-Mouse layout
 ├── tools/
-│   └── debloat-box.sh    # Automated debloater script for stock Allwinner ROMs
+│   ├── debloat-box.sh           # Automated debloater script for stock Allwinner ROMs
+│   └── patch-bootloader-splash.py # Stage 1 bootloader splash patch tool (FAT16)
 └── README.md
 ```
 
@@ -106,12 +109,21 @@ adb shell "chmod 755 /system/bin/fd655_panel && setprop ctl.restart fd655_panel"
 adb push system/bin/grant_sideload_perms.sh /vendor/bin/
 adb shell "chmod 755 /vendor/bin/grant_sideload_perms.sh"
 
-# 4. Deploy CleanBOX Boot Animation
+# 4. Deploy CleanBOX Boot Animation (Stage 2)
 adb push media/bootanimation.zip /system/media/bootanimation.zip
 adb shell "chmod 644 /system/media/bootanimation.zip"
 
 # 5. Lock filesystem back to read-only
 adb shell "mount -o remount,ro / && mount -o remount,ro /vendor"
+
+# 6. (Optional) Patch Stage 1 Bootloader Splash (Seconds 0–5)
+# Dump device bootloader, patch OEM bitmap, and flash back:
+adb shell "dd if=/dev/block/by-name/bootloader of=/data/local/tmp/bootloader.img bs=1M"
+adb pull /data/local/tmp/bootloader.img ./bootloader.img
+python3 tools/patch-bootloader-splash.py ./bootloader.img ./cleanbox_splash.bmp ./bootloader_cleanbox.img
+adb push ./bootloader_cleanbox.img /data/local/tmp/bootloader_cleanbox.img
+adb shell "dd if=/data/local/tmp/bootloader_cleanbox.img of=/dev/block/by-name/bootloader bs=1M && sync"
+adb shell "rm -f /data/local/tmp/bootloader*.img"
 ```
 
 ---
