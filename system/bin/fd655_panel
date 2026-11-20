@@ -1,0 +1,84 @@
+#!/system/bin/sh
+export PATH=/system/bin:/system/xbin
+
+PIDFILE="/dev/fd655_panel.pid"
+if [ -f "$PIDFILE" ]; then
+    OLDPID=$(cat "$PIDFILE" 2>/dev/null)
+    if [ -n "$OLDPID" ] && [ -d "/proc/$OLDPID" ] && [ "$OLDPID" != "$$" ]; then
+        if grep -q "fd655_panel" "/proc/$OLDPID/cmdline" 2>/dev/null; then
+            exit 0
+        fi
+    fi
+fi
+echo "$$" > "$PIDFILE"
+
+while [ ! -e /sys/class/fd655/panel ]; do
+    sleep 1
+done
+
+chmod 0666 /sys/class/fd655/panel 2>/dev/null
+
+while true; do
+    # 1. Digital Clock (System 12h vs 24h format)
+    FMT=$(settings get system time_12_24 2>/dev/null)
+    if [ "$FMT" = "12" ]; then
+        TIME=$(date +%I%M)
+    else
+        TIME=$(date +%H%M)
+    fi
+
+    # 2. Middle Colon (:) - Bit 4 (0x10 / 16) Always ON
+    ICON=16
+
+    # 3. Wi-Fi Icon - Bit 1 (0x02 / 2)
+    if [ -f /sys/class/net/wlan0/operstate ] && [ "$(cat /sys/class/net/wlan0/operstate 2>/dev/null)" = "up" ]; then
+        ICON=$((ICON | 2))
+    fi
+
+    # 4. Ethernet Icon - Bit 0 (0x01 / 1)
+    if [ -f /sys/class/net/eth0/carrier ] && [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null)" = "1" ]; then
+        ICON=$((ICON | 1))
+    fi
+
+    # 5. USB Icon - Bit 6 (0x40 / 64)
+    # Visible when:
+    # - Any USB peripheral is inserted (pendrive, flash drive, mouse, keyboard, RF dongle, hub, etc.)
+    # - OR USB device/PC connection is active (male-to-male ADB cable, MTP, gadget)
+    USB_DEV=0
+    if ls -d /sys/bus/usb/devices/[0-9]-[1-9]* >/dev/null 2>&1 || ls -d /sys/block/sd* >/dev/null 2>&1; then
+        USB_DEV=1
+    elif [ -f /sys/class/android_usb/android0/state ] && [ "$(cat /sys/class/android_usb/android0/state 2>/dev/null)" != "DISCONNECTED" ]; then
+        USB_DEV=1
+    elif grep -q -E "configured|connected" /sys/class/udc/*/state 2>/dev/null; then
+        USB_DEV=1
+    fi
+    if [ "$USB_DEV" -eq 1 ]; then
+        ICON=$((ICON | 64))
+    fi
+
+    # 6. MicroSD / TF Card Icon - Bit 7 (0x80 / 128)
+    if [ -b /dev/block/mmcblk1 ]; then
+        ICON=$((ICON | 128))
+    fi
+
+    # 7. Alarm Icon - Bit 5 (0x20 / 32)
+    ALARM_SET=$(settings get system next_alarm_formatted 2>/dev/null)
+    if [ -n "$ALARM_SET" ] && [ "$ALARM_SET" != "null" ]; then
+        ICON=$((ICON | 32))
+    fi
+
+    # 8. Media Play & Pause Icons - Bit 2 (0x04 / 4 = Play) & Bit 3 (0x08 / 8 = Pause)
+    if dumpsys audio 2>/dev/null | sed -n "/players:/,/ducked players/p" | grep -q "AudioTrack"; then
+        LAST_EVENT=$(dumpsys audio 2>/dev/null | grep -E "player piid:[0-9]+ state:" | tail -n 1)
+        if echo "$LAST_EVENT" | grep -q "state:started"; then
+            ICON=$((ICON | 4))
+        elif echo "$LAST_EVENT" | grep -q "state:paused"; then
+            ICON=$((ICON | 8))
+        fi
+    fi
+
+    HEX=$(printf "%02x" $ICON)
+    printf "%s\x${HEX}" "$TIME" > /sys/class/fd655/panel 2>/dev/null
+
+    sleep 1
+done
